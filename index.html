@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>บุญถาวร — Booking Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --brand-primary: #991B1B;
+    --brand-secondary: #DC2626;
+    --brand-accent: #F87171;
+    --brand-light: #FEF2F2;
+    --ink: #1F2937; --muted: #6B7280; --line: #E5E7EB;
+    --ok: #15803D; --ok-bg: #F0FDF4;
+    --warn: #B45309; --warn-bg: #FFFBEB;
+    --off: #9CA3AF; --off-bg: #F3F4F6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: 'Noto Sans Thai', sans-serif; background: #FAFAF9; color: var(--ink); }
+  header { background: #fff; border-bottom: 3px solid var(--brand-primary); padding: 14px 32px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  .logo { display: flex; align-items: center; gap: 14px; }
+  .logo img { height: 42px; display: block; }
+  .logo-mark { background: var(--brand-primary); color: #fff; font-weight: 800; border-radius: 8px; padding: 6px 12px; font-size: 18px; }
+  .logo h1 { font-size: 18px; font-weight: 700; }
+  .logo .sub { font-size: 12px; color: var(--muted); font-weight: 400; display: flex; align-items: center; gap: 8px; }
+  .src { font-size: 11px; border-radius: 999px; padding: 1px 10px; font-weight: 500; }
+  .src.live { background: var(--ok-bg); color: var(--ok); }
+  .src.mock { background: var(--warn-bg); color: var(--warn); }
+  .clock { text-align: right; }
+  .clock #time { font-size: 24px; font-weight: 800; color: var(--brand-primary); }
+  .clock #date { font-size: 13px; color: var(--muted); }
+  #err { display: none; background: #FEF2F2; color: var(--brand-secondary); font-size: 13px; padding: 8px 32px; border-bottom: 1px solid var(--brand-accent); }
+  main { max-width: 1100px; margin: 0 auto; padding: 28px 24px 60px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 28px; }
+  .kpi { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .kpi .num { font-size: 32px; font-weight: 800; color: var(--brand-primary); }
+  .kpi .lbl { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .kpi.next { background: var(--brand-light); border-color: var(--brand-accent); }
+  .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+  .toolbar h2 { font-size: 18px; font-weight: 700; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 6px 16px; font-size: 13px; font-family: inherit; cursor: pointer; color: var(--muted); }
+  .chip.active { background: var(--brand-primary); border-color: var(--brand-primary); color: #fff; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  thead th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 12px 16px; background: #F9FAFB; border-bottom: 1px solid var(--line); }
+  tbody td { padding: 14px 16px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.now-row { background: var(--brand-light); }
+  .t-time { font-weight: 700; white-space: nowrap; }
+  .cust { font-weight: 500; }
+  .cust small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 500; border-radius: 999px; padding: 3px 12px; white-space: nowrap; }
+  .b-done { background: var(--off-bg); color: var(--off); }
+  .b-now { background: var(--brand-primary); color: #fff; }
+  .b-soon { background: var(--warn-bg); color: var(--warn); }
+  .b-wait { background: var(--ok-bg); color: var(--ok); }
+  .b-cancel { background: #FEF2F2; color: var(--brand-secondary); text-decoration: line-through; }
+  .type { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .type a { color: var(--brand-secondary); }
+  .staff { display: inline-flex; align-items: center; gap: 8px; }
+  .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--brand-light); color: var(--brand-primary); font-weight: 700; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 16px !important; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 24px; }
+  @media (max-width: 720px) {
+    thead { display: none; }
+    table, tbody, tr, td { display: block; width: 100%; }
+    tbody td { border-bottom: none; padding: 4px 16px; }
+    tbody tr { border-bottom: 1px solid var(--line); padding: 10px 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <img src="logo.png" alt="บุญถาวร" onerror="this.remove();document.getElementById('txtmark').style.display='inline-block'">
+    <span class="logo-mark" id="txtmark" style="display:none">บุญถาวร</span>
+    <div>
+      <h1>Booking Dashboard</h1>
+      <span class="sub">Ideas come alive · ระบบนัดหมายลูกค้า
+        <span class="src" id="src">…</span>
+        <span id="upd" style="font-size:11px"></span>
+      </span>
+    </div>
+  </div>
+  <div class="clock">
+    <div id="time">--:--</div>
+    <div id="date"></div>
+  </div>
+</header>
+<div id="err"></div>
+
+<main>
+  <div class="kpis">
+    <div class="kpi"><div class="num" id="k-total">0</div><div class="lbl">นัดวันนี้ทั้งหมด</div></div>
+    <div class="kpi"><div class="num" id="k-done">0</div><div class="lbl">ให้บริการแล้ว</div></div>
+    <div class="kpi"><div class="num" id="k-left">0</div><div class="lbl">รอถึงคิว</div></div>
+    <div class="kpi"><div class="num" id="k-video">0</div><div class="lbl" id="k-vb-lbl">Video call / สาขา</div></div>
+    <div class="kpi next"><div class="num" id="k-next">–</div><div class="lbl" id="k-next-lbl">คิวถัดไป</div></div>
+  </div>
+
+  <div class="toolbar">
+    <h2>คิวนัดหมายวันนี้</h2>
+    <div class="filters" id="filters">
+      <button class="chip active" data-f="all">ทั้งหมด</button>
+      <button class="chip" data-f="branch">ที่สาขา</button>
+      <button class="chip" data-f="video">Video call</button>
+      <button class="chip" data-f="wait">ยังไม่ถึงคิว</button>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>เวลา</th><th>ลูกค้า</th><th>ประเภท</th><th>พนักงานผู้รับ</th><th>สถานะ</th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <footer id="foot"></footer>
+</main>
+
+<script>
+  let data = { source: "-", updatedAt: null, error: null, bookings: [] };
+  let filter = "all";
+  const pad = n => String(n).padStart(2, "0");
+  const hhmm = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function statusOf(b) {
+    if (b.status === "canceled") return { key: "cancel", cls: "b-cancel", label: "ยกเลิกแล้ว" };
+    const now = Date.now();
+    const startMin = Math.round((new Date(b.start) - now) / 60000);
+    const endMin = Math.round((new Date(b.end) - now) / 60000);
+    if (endMin <= 0) return { key: "done", cls: "b-done", label: "เสร็จสิ้น" };
+    if (startMin <= 0) return { key: "now", cls: "b-now", label: "ถึงคิวแล้ว · กำลังให้บริการ" };
+    if (startMin <= 60) return { key: "soon", cls: "b-soon", label: "อีก " + startMin + " นาที" };
+    const h = Math.floor(startMin / 60), m = startMin % 60;
+    return { key: "wait", cls: "b-wait", label: "อีก " + h + " ชม. " + m + " นาที" };
+  }
+
+  function render() {
+    const tbody = document.getElementById("rows");
+    tbody.innerHTML = "";
+    let done = 0, left = 0, video = 0, branch = 0, next = null, shown = 0;
+
+    data.bookings.forEach(b => {
+      const s = statusOf(b);
+      if (b.status !== "canceled") {
+        if (s.key === "done") done++;
+        if (s.key === "soon" || s.key === "wait") left++;
+        b.type === "video" ? video++ : branch++;
+        if ((s.key === "soon" || s.key === "wait") && (!next || new Date(b.start) < new Date(next.start))) next = b;
+      }
+      const show =
+        filter === "all" ||
+        (filter === "branch" && b.type === "branch" && b.status !== "canceled") ||
+        (filter === "video" && b.type === "video" && b.status !== "canceled") ||
+        (filter === "wait" && (s.key === "soon" || s.key === "wait"));
+      if (!show) return;
+      shown++;
+
+      const st = new Date(b.start), en = new Date(b.end);
+      const typeCell = b.type === "video"
+        ? "🎥 Video call" + (b.joinUrl ? ' · <a href="' + esc(b.joinUrl) + '" target="_blank">ลิงก์</a>' : "")
+        : "🏬 " + (esc(b.locationDetail) || "ที่สาขา");
+      const tr = document.createElement("tr");
+      if (s.key === "now") tr.className = "now-row";
+      tr.innerHTML =
+        '<td class="t-time">' + hhmm(st) + "–" + hhmm(en) + "</td>" +
+        '<td class="cust">' + esc(b.customer) + "<small>" + esc(b.phone || b.email || "") +
+          (b.lineUserId ? " · LINE ✓" : "") + "</small></td>" +
+        '<td><span class="type">' + typeCell + "</span></td>" +
+        '<td><span class="staff"><span class="avatar">' + esc((b.staff || "-").replace("คุณ", "").charAt(0)) + "</span>" + esc(b.staff) + "</span></td>" +
+        '<td><span class="badge ' + s.cls + '">' + s.label + "</span></td>";
+      tbody.appendChild(tr);
+    });
+
+    if (!shown) tbody.innerHTML = '<tr><td colspan="5" class="empty">ยังไม่มีนัดหมายในมุมมองนี้</td></tr>';
+
+    const active = data.bookings.filter(b => b.status !== "canceled").length;
+    document.getElementById("k-total").textContent = active;
+    document.getElementById("k-done").textContent = done;
+    document.getElementById("k-left").textContent = left;
+    document.getElementById("k-video").textContent = video;
+    document.getElementById("k-vb-lbl").textContent = "Video call / สาขา = " + video + " / " + branch;
+    if (next) {
+      const s = statusOf(next);
+      document.getElementById("k-next").textContent = hhmm(new Date(next.start));
+      document.getElementById("k-next-lbl").textContent = "คิวถัดไป · " + next.customer.split(" ")[0] + " (" + s.label + ")";
+    } else {
+      document.getElementById("k-next").textContent = "–";
+      document.getElementById("k-next-lbl").textContent = "ไม่มีคิวถัดไป";
+    }
+
+    const srcEl = document.getElementById("src");
+    srcEl.textContent = data.source === "calendly" ? "LIVE · Calendly" : "DEMO · mock data";
+    srcEl.className = "src " + (data.source === "calendly" ? "live" : "mock");
+    document.getElementById("upd").textContent = data.updatedAt ? "อัปเดต " + hhmm(new Date(data.updatedAt)) : "";
+    const err = document.getElementById("err");
+    err.style.display = data.error ? "block" : "none";
+    err.textContent = data.error ? "ดึงข้อมูล Calendly ไม่สำเร็จ: " + data.error : "";
+    document.getElementById("foot").textContent =
+      data.source === "calendly"
+        ? "ข้อมูลจริงจาก Calendly · รีเฟรชอัตโนมัติ (SSE + polling)"
+        : "โหมดสาธิต — ตั้งค่า CALENDLY_TOKEN ใน environment เพื่อใช้ข้อมูลจริง";
+  }
+
+  function tickClock() {
+    const d = new Date();
+    document.getElementById("time").textContent = hhmm(d) + ":" + pad(d.getSeconds());
+    document.getElementById("date").textContent = d.toLocaleDateString("th-TH", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  }
+
+  document.getElementById("filters").addEventListener("click", e => {
+    if (!e.target.dataset.f) return;
+    filter = e.target.dataset.f;
+    document.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === e.target));
+    render();
+  });
+
+  async function load() {
+    try {
+      data = await (await fetch("/api/bookings")).json();
+      render();
+    } catch (e) { console.error(e); }
+  }
+
+  function connectSSE() {
+    const es = new EventSource("/api/stream");
+    es.onmessage = ev => { data = JSON.parse(ev.data); render(); };
+    es.onerror = () => { es.close(); setTimeout(connectSSE, 5000); };
+  }
+
+  tickClock(); load(); connectSSE();
+  setInterval(tickClock, 1000);
+  setInterval(render, 30000);      // refresh countdown labels
+  setInterval(load, 120000);       // safety-net polling
+</script>
+</body>
+</html>

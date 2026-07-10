@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: boonthavorn-booking-dashboard
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: CALENDLY_TOKEN
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: POLL_SECONDS
+        value: "45"
