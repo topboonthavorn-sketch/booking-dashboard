@@ -27,7 +27,9 @@ const TZ_OFFSET_MIN = 7 * 60; // Asia/Bangkok (+07:00)
 const LOGO_URL =
   process.env.LOGO_URL ||
   "https://www.boonthavorn.com/media/logo/websites/1/btv-logo-2X.png";
-const DAYS_AHEAD = Math.min(30, Math.max(0, parseInt(process.env.DAYS_AHEAD || "7", 10)));
+const DAYS_AHEAD = Math.min(60, Math.max(0, parseInt(process.env.DAYS_AHEAD || "30", 10)));
+const LINE_TOKEN = (process.env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
+const LINE_ADMIN_TO = (process.env.LINE_ADMIN_TO || "").trim(); // userId/groupId ของแอดมินที่จะรับแจ้งเตือนทุกนัด
 
 // English URL slug -> exact option text in the Calendly form dropdown
 const BRANCH_SLUGS = {
@@ -223,6 +225,7 @@ async function fetchCalendly() {
       branch: inv.branch || (loc.type === "branch" ? loc.detail : ""),
       detail: inv.detail,
       lineUserId: inv.lineUserId ? "linked" : "",
+      _lineUid: inv.lineUserId || "", // internal only — stripped before responding
     });
   }
   bookings.sort((a, b) => new Date(a.start) - new Date(b.start));
@@ -264,10 +267,58 @@ function mockBookings() {
   }));
 }
 
+// ---------- LINE notifications ----------
+const knownStatus = new Map(); // booking id -> last seen status
+let firstRefresh = true;
+
+function fmtWhen(b) {
+  return new Date(b.start).toLocaleString("th-TH", {
+    timeZone: "Asia/Bangkok", weekday: "short", day: "numeric", month: "short",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+async function linePush(to, text) {
+  if (!LINE_TOKEN || !to) return;
+  try {
+    const r = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${LINE_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ to, messages: [{ type: "text", text }] }),
+    });
+    if (!r.ok) console.error("LINE push failed", r.status, (await r.text()).slice(0, 200));
+  } catch (e) {
+    console.error("LINE push error:", e.message);
+  }
+}
+
+function notifyChanges(bookings) {
+  const skip = firstRefresh; // อย่ายิงแจ้งเตือนย้อนหลังตอน server เพิ่งสตาร์ท
+  for (const b of bookings) {
+    const prev = knownStatus.get(b.id);
+    knownStatus.set(b.id, b.status);
+    if (skip) continue;
+    const place = b.type === "video"
+      ? "🎥 Video call" + (b.joinUrl ? "\n" + b.joinUrl : "")
+      : "🏬 " + (b.branch || "ที่สาขา");
+    const extra = b.detail ? `\n📝 ${b.detail}` : "";
+    if (!prev && b.status === "active") {
+      linePush(b._lineUid, `✅ ยืนยันนัดหมาย บุญถาวร\n👤 ${b.customer}\n📅 ${fmtWhen(b)} น.\n${place}${extra}`);
+      linePush(LINE_ADMIN_TO, `🔔 นัดหมายใหม่\n👤 ${b.customer} ${b.phone || ""}\n📅 ${fmtWhen(b)} น.\n${place}${extra}`);
+    } else if (prev === "active" && b.status === "canceled") {
+      linePush(b._lineUid, `❌ นัดหมายของคุณถูกยกเลิกแล้ว\n📅 ${fmtWhen(b)} น.`);
+      linePush(LINE_ADMIN_TO, `❌ ยกเลิกนัด: ${b.customer}\n📅 ${fmtWhen(b)} น.`);
+    }
+  }
+  firstRefresh = false;
+}
+
 async function refresh(reason) {
   try {
     const bookings = TOKEN ? await fetchCalendly() : mockBookings();
-    cache = { source: TOKEN ? "calendly" : "mock", updatedAt: new Date().toISOString(), error: null, branches: BRANCH_SLUGS, bookings };
+    notifyChanges(bookings);
+    const publicBookings = bookings.map(({ _lineUid, ...rest }) => rest);
+    cache = { source: TOKEN ? "calendly" : "mock", updatedAt: new Date().toISOString(), error: null, branches: BRANCH_SLUGS, bookings: publicBookings };
   } catch (e) {
     console.error(`refresh failed (${reason}):`, e.message);
     cache = { ...cache, updatedAt: new Date().toISOString(), error: e.message };
@@ -296,6 +347,40 @@ app.get("/api/stream", (req, res) => {
 app.post("/webhook/calendly", (req, res) => {
   res.status(200).json({ ok: true });
   refresh("webhook");
+});
+
+// ---------- one-time webhook setup (needs token scope webhooks:write, paid/trial plan) ----------
+app.get("/admin/setup-webhook", async (req, res) => {
+  try {
+    const me = await cly("https://api.calendly.com/users/me");
+    const url = `https://${req.get("host")}/webhook/calendly`;
+    const r = await fetch("https://api.calendly.com/webhook_subscriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        events: ["invitee.created", "invitee.canceled"],
+        organization: me.resource.current_organization,
+        scope: "organization",
+      }),
+    });
+    const j = await r.json();
+    res.status(r.status).json(j);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/admin/webhooks", async (req, res) => {
+  try {
+    const me = await cly("https://api.calendly.com/users/me");
+    const j = await cly(
+      `https://api.calendly.com/webhook_subscriptions?organization=${encodeURIComponent(me.resource.current_organization)}&scope=organization&count=20`
+    );
+    res.json(j);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get("/healthz", (req, res) => res.send("ok"));
