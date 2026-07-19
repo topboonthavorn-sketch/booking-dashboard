@@ -27,6 +27,25 @@ const TZ_OFFSET_MIN = 7 * 60; // Asia/Bangkok (+07:00)
 const LOGO_URL =
   process.env.LOGO_URL ||
   "https://www.boonthavorn.com/media/logo/websites/1/btv-logo-2X.png";
+const DAYS_AHEAD = Math.min(30, Math.max(0, parseInt(process.env.DAYS_AHEAD || "7", 10)));
+
+// English URL slug -> exact option text in the Calendly form dropdown
+const BRANCH_SLUGS = {
+  "ratchada": "บุญถาวร สาขารัชดา (Boonthavorn Ratchada)",
+  "kaset-nawamin": "บุญถาวร สาขาเกษตร-นวมินทร์ (Boonthavorn Kaset Nawamin)",
+  "bangna": "บุญถาวร สาขาบางนา (Boonthavorn Bangna)",
+  "ratchapruek": "บุญถาวร สาขาราชพฤกษ์ (Boonthavorn Ratchapruek)",
+  "phuttamonthon": "บุญถาวร สาขาพุธมณฑล (Boonthavorn Phuttamonthon)",
+  "rangsit": "บุญถาวร สาขารังสิต (Boonthavorn Rangsit)",
+  "rama2": "บุญถาวร สาขาพระราม 2 (Boonthavorn Rama 2)",
+  "pattaya": "บุญถาวร สาขาพัทยา (Boonthavorn Pattaya)",
+  "huahin": "บุญถาร สาขาหัวหิน (Boonthavorn Huahin)",
+  "korat": "บุญถาวร สาขาโคราช (Boonthavorn Korat)",
+  "udonthani": "บุญถาวร สาขาอุดรธานี (Boonthavorn Udonthani)",
+  "chiangmai": "บุญถาวร สาขาเชียงใหม่ (Boonthavorn Chiangmai)",
+  "phitsanulok": "บุญถาวร สาขาพิษณุโลก (Boonthavorn Phitsanulok)",
+  "suratthani": "บุญถาวร สาขาสุราษฎร์ธานี (Boonthavorn Suratthani)",
+};
 
 // ---------- optional basic auth ----------
 app.use((req, res, next) => {
@@ -70,6 +89,7 @@ let cache = {
   source: TOKEN ? "calendly" : "mock",
   updatedAt: null,
   error: null,
+  branches: BRANCH_SLUGS,
   bookings: [],
 };
 let lastHash = "";
@@ -78,12 +98,13 @@ const inviteeCache = new Map(); // event uri -> invitee info
 
 // ---------- helpers ----------
 function bangkokDayRange() {
+  // from today 00:00 (Bangkok) up to DAYS_AHEAD days into the future
   const nowBkk = new Date(Date.now() + TZ_OFFSET_MIN * 60000);
   const start = new Date(
     Date.UTC(nowBkk.getUTCFullYear(), nowBkk.getUTCMonth(), nowBkk.getUTCDate()) -
       TZ_OFFSET_MIN * 60000
   );
-  const end = new Date(start.getTime() + 24 * 3600 * 1000);
+  const end = new Date(start.getTime() + (1 + DAYS_AHEAD) * 24 * 3600 * 1000);
   return { start, end };
 }
 
@@ -213,14 +234,17 @@ function mockBookings() {
     const s = new Date(Date.now() + min * 60000);
     return { start: s.toISOString(), end: new Date(s.getTime() + dur * 60000).toISOString() };
   };
+  const B = BRANCH_SLUGS;
   const rows = [
-    [-150, 45, "คุณสมชาย วงศ์สุวรรณ", "somchai@gmail.com", "081-234-5678", "branch", "สาขาเกษตร-นวมินทร์", "ดูกระเบื้องห้องน้ำ", "active"],
+    [-150, 45, "คุณสมชาย วงศ์สุวรรณ", "somchai@gmail.com", "081-234-5678", "branch", B["kaset-nawamin"], "ดูกระเบื้องห้องน้ำ", "active"],
     [-90, 30, "คุณอรทัย ศรีบุญ", "orathai@gmail.com", "089-876-5432", "video", "", "ปรึกษาออกแบบห้องครัว", "active"],
-    [-20, 45, "คุณพิมพ์ชนก ตั้งใจ", "pim@gmail.com", "086-111-2233", "branch", "สาขารัตนาธิเบศร์", "เลือกสุขภัณฑ์", "active"],
+    [-20, 45, "คุณพิมพ์ชนก ตั้งใจ", "pim@gmail.com", "086-111-2233", "branch", B["ratchada"], "เลือกสุขภัณฑ์", "active"],
     [35, 30, "คุณวีระ จันทร์เพ็ญ", "weera@gmail.com", "082-555-6677", "video", "", "สอบถามโปรโมชัน", "active"],
-    [75, 45, "คุณมะลิ ทองดี", "mali@gmail.com", "084-999-0011", "branch", "สาขาเกษตร-นวมินทร์", "งบ 2 แสน รีโนเวทบ้าน", "active"],
+    [75, 45, "คุณมะลิ ทองดี", "mali@gmail.com", "084-999-0011", "branch", B["kaset-nawamin"], "งบ 2 แสน รีโนเวทบ้าน", "active"],
     [120, 30, "คุณกิตติ พูนสุข", "kitti@gmail.com", "087-333-4455", "video", "", "", "canceled"],
-    [180, 45, "คุณนภา แก้วใส", "napa@gmail.com", "085-777-8899", "branch", "สาขาราชพฤกษ์", "ดูโคมไฟ", "active"],
+    [180, 45, "คุณนภา แก้วใส", "napa@gmail.com", "085-777-8899", "branch", B["ratchapruek"], "ดูโคมไฟ", "active"],
+    [1500, 45, "คุณเอก บุญมาก", "ake@gmail.com", "081-000-1122", "branch", B["rangsit"], "ดูห้องครัวชุดใหญ่", "active"],
+    [1620, 30, "คุณฝน ใจเย็น", "fon@gmail.com", "090-222-3344", "video", "", "ปรึกษางบรีโนเวท", "active"],
   ];
   return rows.map(([min, dur, name, email, phone, type, branch, detail, status], i) => ({
     id: "mock-" + i,
@@ -243,7 +267,7 @@ function mockBookings() {
 async function refresh(reason) {
   try {
     const bookings = TOKEN ? await fetchCalendly() : mockBookings();
-    cache = { source: TOKEN ? "calendly" : "mock", updatedAt: new Date().toISOString(), error: null, bookings };
+    cache = { source: TOKEN ? "calendly" : "mock", updatedAt: new Date().toISOString(), error: null, branches: BRANCH_SLUGS, bookings };
   } catch (e) {
     console.error(`refresh failed (${reason}):`, e.message);
     cache = { ...cache, updatedAt: new Date().toISOString(), error: e.message };

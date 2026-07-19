@@ -98,7 +98,7 @@
 
 <main>
   <div class="kpis">
-    <div class="kpi"><div class="num" id="k-total">0</div><div class="lbl">นัดวันนี้ทั้งหมด</div></div>
+    <div class="kpi"><div class="num" id="k-total">0</div><div class="lbl">นัดทั้งหมด (วันที่เลือก)</div></div>
     <div class="kpi"><div class="num" id="k-done">0</div><div class="lbl">ให้บริการแล้ว</div></div>
     <div class="kpi"><div class="num" id="k-left">0</div><div class="lbl">รอถึงคิว</div></div>
     <div class="kpi"><div class="num" id="k-video">0</div><div class="lbl" id="k-vb-lbl">Video call / สาขา</div></div>
@@ -106,6 +106,8 @@
   </div>
 
   <div class="branch-links" id="branch-links" style="display:none"></div>
+
+  <div class="filters" id="day-filters" style="margin-bottom:14px"></div>
 
   <div class="toolbar">
     <h2 id="list-title">คิวนัดหมายวันนี้</h2>
@@ -128,22 +130,34 @@
 </main>
 
 <script>
-  // /b/<ชื่อสาขา> = branch view (substring match), / = admin sees all
+  // /b/<slug> = branch view (slug -> ชื่อสาขาในฟอร์ม มาจาก /api/bookings .branches), / = admin sees all
   const bm = decodeURIComponent(location.pathname).match(/^\/b\/(.+?)\/?$/);
-  const BRANCH = bm ? bm[1] : null;
+  const SLUG = bm ? bm[1] : null;
 
-  let data = { source: "-", updatedAt: null, error: null, bookings: [] };
+  let data = { source: "-", updatedAt: null, error: null, branches: {}, bookings: [] };
   let filter = "all";
+  let selectedDay = null; // YYYY-MM-DD (เวลาไทย)
   const pad = n => String(n).padStart(2, "0");
   const hhmm = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const dayKey = d => new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+  const todayKey = () => dayKey(new Date());
 
-  if (BRANCH) {
+  function branchName() {
+    if (!SLUG) return null;
+    return data.branches[SLUG] || SLUG; // unknown slug -> literal match (รองรับพิมพ์ชื่อไทยตรงๆ)
+  }
+  function shortName(full) {
+    return String(full).replace(/\s*\(.*\)\s*/, "").replace(/บุญถา?วร\s*/, "").trim();
+  }
+  function updateBranchHeader() {
+    if (!SLUG) return;
+    const nm = shortName(branchName());
     const tag = document.getElementById("branch-tag");
-    tag.textContent = BRANCH;
+    tag.textContent = nm;
     tag.style.display = "inline-block";
-    document.getElementById("list-title").textContent = "คิวนัดหมายวันนี้ · " + BRANCH;
-    document.title = BRANCH + " — Booking Dashboard";
+    document.getElementById("list-title").textContent = "คิวนัดหมาย · " + nm;
+    document.title = nm + " — Booking Dashboard";
   }
 
   function statusOf(b) {
@@ -158,12 +172,36 @@
     return { key: "wait", cls: "b-wait", label: "อีก " + h + " ชม. " + m + " นาที" };
   }
 
+  function branchBookings() {
+    if (!SLUG) return data.bookings;
+    const full = branchName();
+    const en = (String(full).match(/\(Boonthavorn (.+?)\)/) || [])[1];
+    return data.bookings.filter(b => {
+      const br = b.branch || "";
+      return br === full || (en && br.includes(en)) || br.includes(full);
+    });
+  }
+
+  function renderDayChips(list) {
+    const days = [...new Set([todayKey(), ...list.map(b => dayKey(b.start))])].sort();
+    if (!selectedDay || !days.includes(selectedDay)) selectedDay = todayKey();
+    const el = document.getElementById("day-filters");
+    const tmr = dayKey(new Date(Date.now() + 24 * 3600 * 1000));
+    el.innerHTML = days.map(d => {
+      let label = d === todayKey() ? "วันนี้" : d === tmr ? "พรุ่งนี้" :
+        new Date(d + "T12:00:00+07:00").toLocaleDateString("th-TH", { weekday: "short", day: "numeric", month: "short" });
+      const n = list.filter(b => dayKey(b.start) === d && b.status !== "canceled").length;
+      return '<button class="chip' + (d === selectedDay ? " active" : "") + '" data-d="' + d + '">' + label + (n ? " (" + n + ")" : "") + "</button>";
+    }).join("");
+  }
+
   function visibleBookings() {
-    if (!BRANCH) return data.bookings;
-    return data.bookings.filter(b => (b.branch || "").includes(BRANCH));
+    return branchBookings().filter(b => dayKey(b.start) === selectedDay);
   }
 
   function render() {
+    updateBranchHeader();
+    renderDayChips(branchBookings());
     const list = visibleBookings();
     const tbody = document.getElementById("rows");
     tbody.innerHTML = "";
@@ -220,13 +258,13 @@
       document.getElementById("k-next-lbl").textContent = "ไม่มีคิวถัดไป";
     }
 
-    if (!BRANCH) {
-      const branches = [...new Set(data.bookings.map(b => b.branch).filter(Boolean))].sort();
+    if (!SLUG) {
       const el = document.getElementById("branch-links");
-      if (branches.length) {
+      const entries = Object.entries(data.branches || {});
+      if (entries.length) {
         el.style.display = "flex";
         el.innerHTML = "<span>เปิดหน้ารายสาขา:</span>" +
-          branches.map(br => '<a href="/b/' + encodeURIComponent(br) + '">' + esc(br) + "</a>").join("");
+          entries.map(([slug, full]) => '<a href="/b/' + slug + '" title="' + esc(full) + '">' + esc(shortName(full)) + "</a>").join("");
       } else el.style.display = "none";
     }
 
@@ -253,7 +291,13 @@
   document.getElementById("filters").addEventListener("click", e => {
     if (!e.target.dataset.f) return;
     filter = e.target.dataset.f;
-    document.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === e.target));
+    document.querySelectorAll("#filters .chip").forEach(c => c.classList.toggle("active", c === e.target));
+    render();
+  });
+
+  document.getElementById("day-filters").addEventListener("click", e => {
+    if (!e.target.dataset.d) return;
+    selectedDay = e.target.dataset.d;
     render();
   });
 
