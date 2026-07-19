@@ -5,9 +5,12 @@
  *  - CALENDLY_TOKEN set  -> polls Calendly API (works on FREE plan, no webhook needed)
  *  - CALENDLY_TOKEN unset -> mock mode (demo data relative to current time)
  *
+ * Views:
+ *  - /            admin view (all branches)
+ *  - /b/<branch>  branch view, filtered (e.g. /b/เกษตร matches "สาขาเกษตร-นวมินทร์")
+ *
  * Real-time to browser: Server-Sent Events (/api/stream) + polling fallback.
- * Webhook endpoint (/webhook/calendly) is ready for when the plan supports it —
- * it just triggers an immediate refresh, so upgrading later = instant updates.
+ * Webhook endpoint (/webhook/calendly) is ready for paid plans.
  */
 const express = require("express");
 const path = require("path");
@@ -21,6 +24,9 @@ const TOKEN = (process.env.CALENDLY_TOKEN || "").trim();
 const POLL_SECONDS = Math.max(20, parseInt(process.env.POLL_SECONDS || "45", 10));
 const PASSWORD = (process.env.DASHBOARD_PASSWORD || "").trim();
 const TZ_OFFSET_MIN = 7 * 60; // Asia/Bangkok (+07:00)
+const LOGO_URL =
+  process.env.LOGO_URL ||
+  "https://www.boonthavorn.com/media/logo/websites/1/btv-logo-2X.png";
 
 // ---------- optional basic auth ----------
 app.use((req, res, next) => {
@@ -35,10 +41,29 @@ app.use((req, res, next) => {
   return res.status(401).send("Authentication required");
 });
 
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
-app.get("/logo.png", (req, res) =>
-  res.sendFile(path.join(__dirname, "logo.png"), (err) => { if (err) res.status(404).end(); })
+// ---------- pages & logo ----------
+app.get(["/", "/b/:branch"], (req, res) =>
+  res.sendFile(path.join(__dirname, "index.html"))
 );
+
+let logoCache = null;
+app.get("/logo.png", (req, res) => {
+  res.sendFile(path.join(__dirname, "logo.png"), async (err) => {
+    if (!err) return; // served local override
+    try {
+      if (!logoCache) {
+        const r = await fetch(LOGO_URL);
+        if (!r.ok) throw new Error("logo fetch " + r.status);
+        logoCache = Buffer.from(await r.arrayBuffer());
+      }
+      res.set("Content-Type", "image/png");
+      res.set("Cache-Control", "public, max-age=86400");
+      res.send(logoCache);
+    } catch (e) {
+      if (!res.headersSent) res.status(404).end();
+    }
+  });
+});
 
 // ---------- state ----------
 let cache = {
@@ -81,6 +106,20 @@ function normalizeLocation(loc) {
   return { type: "branch", detail: loc.location || loc.type || "", joinUrl: "" };
 }
 
+// Map Calendly custom-question answers to fields by keywords in the question text
+function parseAnswers(qas) {
+  const out = { phone: "", branch: "", detail: "" };
+  for (const q of qas || []) {
+    const question = (q.question || "").toLowerCase();
+    const answer = (q.answer || "").trim();
+    if (!answer) continue;
+    if (!out.phone && /(phone|เบอร์|โทร)/i.test(question)) out.phone = answer;
+    else if (!out.branch && /(branch|สาขา)/i.test(question)) out.branch = answer;
+    else if (!out.detail && /(detail|รายละเอียด|เพิ่มเติม|note|หัวข้อ|เรื่อง)/i.test(question)) out.detail = answer;
+  }
+  return out;
+}
+
 async function listScheduledEvents(scopeParam, status, range) {
   const out = [];
   let url =
@@ -98,19 +137,18 @@ async function listScheduledEvents(scopeParam, status, range) {
 
 async function inviteeOf(eventUri) {
   if (inviteeCache.has(eventUri)) return inviteeCache.get(eventUri);
-  let info = { name: "-", email: "", phone: "", lineUserId: "" };
+  let info = { name: "-", email: "", phone: "", branch: "", detail: "", lineUserId: "" };
   try {
     const j = await cly(`${eventUri}/invitees?count=1`);
     const inv = j.collection[0];
     if (inv) {
-      let phone = "";
-      for (const q of inv.questions_and_answers || []) {
-        if (/phone|เบอร์|โทร/i.test(q.question)) phone = q.answer;
-      }
+      const ans = parseAnswers(inv.questions_and_answers);
       info = {
         name: inv.name || "-",
         email: inv.email || "",
-        phone: phone || (inv.text_reminder_number || ""),
+        phone: ans.phone || inv.text_reminder_number || "",
+        branch: ans.branch,
+        detail: ans.detail,
         lineUserId: (inv.tracking && inv.tracking.utm_content) || "",
       };
     }
@@ -125,8 +163,6 @@ async function inviteeOf(eventUri) {
 async function fetchCalendly() {
   const me = await cly("https://api.calendly.com/users/me");
   const range = bangkokDayRange();
-  // Prefer organization scope (sees every host's round-robin events);
-  // fall back to user scope if the token lacks org permission.
   let events = [];
   const scopes = [
     `organization=${encodeURIComponent(me.resource.current_organization)}`,
@@ -163,6 +199,8 @@ async function fetchCalendly() {
       customer: inv.name,
       email: inv.email,
       phone: inv.phone,
+      branch: inv.branch || (loc.type === "branch" ? loc.detail : ""),
+      detail: inv.detail,
       lineUserId: inv.lineUserId ? "linked" : "",
     });
   }
@@ -176,26 +214,28 @@ function mockBookings() {
     return { start: s.toISOString(), end: new Date(s.getTime() + dur * 60000).toISOString() };
   };
   const rows = [
-    [-150, 45, "คุณสมชาย วงศ์สุวรรณ", "081-234-5678", "branch", "คุณนก", "active"],
-    [-90, 30, "คุณอรทัย ศรีบุญ", "089-876-5432", "video", "คุณเบียร์", "active"],
-    [-20, 45, "คุณพิมพ์ชนก ตั้งใจ", "086-111-2233", "branch", "คุณแพร", "active"],
-    [35, 30, "คุณวีระ จันทร์เพ็ญ", "082-555-6677", "video", "คุณนก", "active"],
-    [75, 45, "คุณมะลิ ทองดี", "084-999-0011", "branch", "คุณเบียร์", "active"],
-    [120, 30, "คุณกิตติ พูนสุข", "087-333-4455", "video", "คุณแพร", "canceled"],
-    [180, 45, "คุณนภา แก้วใส", "085-777-8899", "branch", "คุณนก", "active"],
+    [-150, 45, "คุณสมชาย วงศ์สุวรรณ", "somchai@gmail.com", "081-234-5678", "branch", "สาขาเกษตร-นวมินทร์", "ดูกระเบื้องห้องน้ำ", "active"],
+    [-90, 30, "คุณอรทัย ศรีบุญ", "orathai@gmail.com", "089-876-5432", "video", "", "ปรึกษาออกแบบห้องครัว", "active"],
+    [-20, 45, "คุณพิมพ์ชนก ตั้งใจ", "pim@gmail.com", "086-111-2233", "branch", "สาขารัตนาธิเบศร์", "เลือกสุขภัณฑ์", "active"],
+    [35, 30, "คุณวีระ จันทร์เพ็ญ", "weera@gmail.com", "082-555-6677", "video", "", "สอบถามโปรโมชัน", "active"],
+    [75, 45, "คุณมะลิ ทองดี", "mali@gmail.com", "084-999-0011", "branch", "สาขาเกษตร-นวมินทร์", "งบ 2 แสน รีโนเวทบ้าน", "active"],
+    [120, 30, "คุณกิตติ พูนสุข", "kitti@gmail.com", "087-333-4455", "video", "", "", "canceled"],
+    [180, 45, "คุณนภา แก้วใส", "napa@gmail.com", "085-777-8899", "branch", "สาขาราชพฤกษ์", "ดูโคมไฟ", "active"],
   ];
-  return rows.map(([min, dur, name, phone, type, staff, status], i) => ({
+  return rows.map(([min, dur, name, email, phone, type, branch, detail, status], i) => ({
     id: "mock-" + i,
     title: type === "video" ? "ปรึกษาออนไลน์ (video call)" : "นัดหมายที่สาขา",
     ...at(min, dur),
     status,
     type,
-    locationDetail: type === "branch" ? "บุญถาวร สาขาเกษตร-นวมินทร์" : "Video call",
+    locationDetail: branch || "Video call",
     joinUrl: type === "video" ? "https://meet.google.com/mock-demo" : "",
-    staff,
+    staff: ["คุณนก", "คุณเบียร์", "คุณแพร"][i % 3],
     customer: name,
-    email: "",
+    email,
     phone,
+    branch,
+    detail,
     lineUserId: "linked",
   }));
 }
@@ -216,7 +256,7 @@ async function refresh(reason) {
   }
 }
 
-// ---------- routes ----------
+// ---------- API ----------
 app.get("/api/bookings", (req, res) => res.json(cache));
 
 app.get("/api/stream", (req, res) => {
