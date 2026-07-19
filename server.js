@@ -51,7 +51,8 @@ const BRANCH_SLUGS = {
 
 // ---------- optional basic auth ----------
 app.use((req, res, next) => {
-  if (!PASSWORD || req.path === "/webhook/calendly") return next();
+  const publicPaths = ["/webhook/calendly", "/liff", "/logo.png", "/healthz"];
+  if (!PASSWORD || publicPaths.includes(req.path)) return next();
   const hdr = req.headers.authorization || "";
   const [scheme, b64] = hdr.split(" ");
   if (scheme === "Basic" && b64) {
@@ -347,6 +348,42 @@ app.get("/api/stream", (req, res) => {
 app.post("/webhook/calendly", (req, res) => {
   res.status(200).json({ ok: true });
   refresh("webhook");
+});
+
+// ---------- LIFF: จับ LINE userId ของลูกค้าแล้วพาไปหน้าจอง Calendly ----------
+const LIFF_ID = (process.env.LIFF_ID || "").trim();
+const CALENDLY_EVENT_PATH = (process.env.CALENDLY_EVENT_PATH || "storebooking").replace(/^\//, "");
+let bookingUrlCache = "";
+async function bookingUrl() {
+  if (bookingUrlCache) return bookingUrlCache;
+  const me = await cly("https://api.calendly.com/users/me");
+  bookingUrlCache = me.resource.scheduling_url + "/" + CALENDLY_EVENT_PATH;
+  return bookingUrlCache;
+}
+
+app.get("/liff", async (req, res) => {
+  if (!LIFF_ID) {
+    return res.status(200).send('<meta charset="utf-8"><h3>ยังไม่ได้ตั้งค่า LIFF_ID</h3><p>เพิ่ม environment variable ชื่อ LIFF_ID ใน Render แล้ว deploy ใหม่</p>');
+  }
+  let target = "";
+  try { target = await bookingUrl(); } catch (e) {
+    return res.status(500).send('<meta charset="utf-8"><p>เชื่อมต่อ Calendly ไม่สำเร็จ ลองใหม่อีกครั้ง</p>');
+  }
+  res.send(`<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>บุญถาวร — จองคิวนัดหมาย</title></head>
+<body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:90vh;color:#991B1B">
+<div>กำลังเปิดหน้าจองคิว...</div>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"><\/script>
+<script>
+liff.init({ liffId: ${JSON.stringify(LIFF_ID)} }).then(async () => {
+  if (!liff.isLoggedIn()) return liff.login();
+  const p = await liff.getProfile();
+  const u = new URL(${JSON.stringify(target)});
+  u.searchParams.set("utm_source", "line");
+  u.searchParams.set("utm_content", p.userId);
+  u.searchParams.set("name", p.displayName);
+  location.replace(u.toString());
+}).catch(e => { document.body.textContent = "เปิดไม่สำเร็จ: " + e.message; });
+<\/script></body></html>`);
 });
 
 // ---------- one-time webhook setup (needs token scope webhooks:write, paid/trial plan) ----------
