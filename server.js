@@ -279,18 +279,73 @@ function fmtWhen(b) {
   });
 }
 
-async function linePush(to, text) {
+async function linePush(to, message) {
   if (!LINE_TOKEN || !to) return;
   try {
     const r = await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",
       headers: { Authorization: `Bearer ${LINE_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ to, messages: [{ type: "text", text }] }),
+      body: JSON.stringify({ to, messages: [typeof message === "string" ? { type: "text", text: message } : message] }),
     });
     if (!r.ok) console.error("LINE push failed", r.status, (await r.text()).slice(0, 200));
   } catch (e) {
     console.error("LINE push error:", e.message);
   }
+}
+
+// Flex Message การ์ดนัดหมายตาม CI บุญถาวร
+function flexRow(label, value) {
+  return {
+    type: "box", layout: "baseline", spacing: "sm",
+    contents: [
+      { type: "text", text: label, color: "#9CA3AF", size: "sm", flex: 2 },
+      { type: "text", text: String(value || "-"), wrap: true, color: "#1F2937", size: "sm", flex: 5 },
+    ],
+  };
+}
+
+function bookingFlex(b, kind) { // kind: confirm | new | cancel
+  const title =
+    kind === "confirm" ? "✅ ยืนยันนัดหมายสำเร็จ" :
+    kind === "new" ? "🔔 มีนัดหมายใหม่" : "❌ นัดหมายถูกยกเลิก";
+  const headerColor = kind === "cancel" ? "#6B7280" : "#991B1B";
+  const rows = [];
+  if (kind !== "confirm") rows.push(flexRow("ลูกค้า", b.customer + (b.phone ? " · " + b.phone : "")));
+  rows.push(flexRow("วันเวลา", fmtWhen(b) + " น."));
+  rows.push(b.type === "video" ? flexRow("รูปแบบ", "Video call ออนไลน์") : flexRow("สาขา", b.branch || "ที่สาขา"));
+  if (b.detail) rows.push(flexRow("รายละเอียด", b.detail));
+  const bubble = {
+    type: "bubble",
+    header: {
+      type: "box", layout: "vertical", paddingAll: "16px",
+      contents: [
+        { type: "text", text: "บุญถาวร | Boonthavorn", color: "#FFFFFF", weight: "bold", size: "md" },
+        { type: "text", text: title, color: kind === "cancel" ? "#E5E7EB" : "#FECACA", size: "sm", margin: "xs" },
+      ],
+    },
+    body: { type: "box", layout: "vertical", spacing: "md", contents: rows },
+    styles: { header: { backgroundColor: headerColor } },
+  };
+  if (kind !== "cancel") {
+    const buttons = [];
+    if (b.type === "video" && b.joinUrl) {
+      buttons.push({
+        type: "button", style: "primary", color: "#991B1B", height: "sm",
+        action: { type: "uri", label: "เข้าร่วม Video call", uri: b.joinUrl },
+      });
+    }
+    if (b.type === "branch" && b.branch) {
+      const q = "บุญถาวร " + b.branch.replace(/\s*\(.*\)\s*/, "").replace(/บุญถาวร\s*/, "");
+      buttons.push({
+        type: "button", style: "primary", color: "#991B1B", height: "sm",
+        action: { type: "uri", label: "📍 ดูแผนที่สาขา", uri: "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q) },
+      });
+    }
+    if (buttons.length) {
+      bubble.footer = { type: "box", layout: "vertical", spacing: "sm", contents: buttons };
+    }
+  }
+  return { type: "flex", altText: title.replace(/^[^ ]+ /, "") + " · " + fmtWhen(b) + " น.", contents: bubble };
 }
 
 function notifyChanges(bookings) {
@@ -299,16 +354,12 @@ function notifyChanges(bookings) {
     const prev = knownStatus.get(b.id);
     knownStatus.set(b.id, b.status);
     if (skip) continue;
-    const place = b.type === "video"
-      ? "🎥 Video call" + (b.joinUrl ? "\n" + b.joinUrl : "")
-      : "🏬 " + (b.branch || "ที่สาขา");
-    const extra = b.detail ? `\n📝 ${b.detail}` : "";
     if (!prev && b.status === "active") {
-      linePush(b._lineUid, `✅ ยืนยันนัดหมาย บุญถาวร\n👤 ${b.customer}\n📅 ${fmtWhen(b)} น.\n${place}${extra}`);
-      linePush(LINE_ADMIN_TO, `🔔 นัดหมายใหม่\n👤 ${b.customer} ${b.phone || ""}\n📅 ${fmtWhen(b)} น.\n${place}${extra}`);
+      linePush(b._lineUid, bookingFlex(b, "confirm"));
+      linePush(LINE_ADMIN_TO, bookingFlex(b, "new"));
     } else if (prev === "active" && b.status === "canceled") {
-      linePush(b._lineUid, `❌ นัดหมายของคุณถูกยกเลิกแล้ว\n📅 ${fmtWhen(b)} น.`);
-      linePush(LINE_ADMIN_TO, `❌ ยกเลิกนัด: ${b.customer}\n📅 ${fmtWhen(b)} น.`);
+      linePush(b._lineUid, bookingFlex(b, "cancel"));
+      linePush(LINE_ADMIN_TO, bookingFlex(b, "cancel"));
     }
   }
   firstRefresh = false;
